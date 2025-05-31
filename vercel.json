@@ -1,17 +1,7 @@
 {
   "functions": {
     "api/calendar.py": {
-      "runtime": "python3.9"
+      "runtime": "@vercel/python"
     }
-  },
-  "routes": [
-    {
-      "src": "/calendar",
-      "dest": "/api/calendar"
-    },
-    {
-      "src": "/",
-      "dest": "/api/calendar"
-    }
-  ]
+  }
 }
