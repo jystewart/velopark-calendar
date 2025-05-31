@@ -132,7 +132,9 @@ def parse_week_date(week_title):
     month_name = match.group(2).lower()
     
     # Use the current year when the code is run
-    year = datetime.now().year
+    now = datetime.now()
+    year = now.year
+    current_month = now.month
     
     months = {
         'january': 1, 'jan': 1,
@@ -152,6 +154,14 @@ def parse_week_date(week_title):
     month = months.get(month_name)
     if not month:
         return None
+    
+    # Handle year boundary cases
+    if current_month == 12 and month == 1:
+        # If it's December and we see a January date, assume it's next year
+        year += 1
+    elif current_month == 1 and month == 12:
+        # If it's January and we see a December date, assume it's last year
+        year -= 1
     
     try:
         return datetime(year, month, day)

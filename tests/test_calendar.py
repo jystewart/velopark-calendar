@@ -454,6 +454,212 @@ class TestActualCalendarFunctions(unittest.TestCase):
         else:
             print("✓ No pattern repetition detected")
 
+    def test_year_boundary_edge_cases(self):
+        """Test year boundary logic for December/January transitions"""
+        print(f"\n=== YEAR BOUNDARY EDGE CASES TEST ===")
+        
+        # We need to test the logic by temporarily modifying what the function thinks is "now"
+        # We'll monkey patch datetime.now() to simulate different current dates
+        
+        from unittest.mock import patch
+        
+        test_cases = [
+            # Format: (current_date, week_title, expected_year, description)
+            
+            # December scenarios - January dates should be next year
+            ("2024-12-15", "Week beginning 6 January", 2025, "December 2024 → January should be 2025"),
+            ("2024-12-31", "Week beginning 1 January", 2025, "December 31 → January should be next year"),
+            ("2024-12-01", "Week beginning 13 January", 2025, "Early December → January should be next year"),
+            
+            # January scenarios - December dates should be previous year
+            ("2025-01-15", "Week beginning 30 December", 2024, "January 2025 → December should be 2024"),
+            ("2025-01-01", "Week beginning 23 December", 2024, "January 1 → December should be previous year"),
+            ("2025-01-31", "Week beginning 16 December", 2024, "Late January → December should be previous year"),
+            
+            # Normal cases within the same year
+            ("2025-05-15", "Week beginning 26 May", 2025, "May → May should be same year"),
+            ("2025-06-01", "Week beginning 2 June", 2025, "June → June should be same year"),
+            ("2025-11-15", "Week beginning 3 November", 2025, "November → November should be same year"),
+            
+            # Edge cases - February scenarios (should not trigger cross-year logic)
+            ("2025-02-15", "Week beginning 10 February", 2025, "February → February should be same year"),
+            ("2025-02-28", "Week beginning 3 March", 2025, "Late February → March should be same year"),
+            
+            # Edge cases - November scenarios (should not trigger cross-year logic)
+            ("2025-11-30", "Week beginning 1 December", 2025, "November → December should be same year"),
+            ("2025-10-15", "Week beginning 3 November", 2025, "October → November should be same year"),
+        ]
+        
+        for current_date_str, week_title, expected_year, description in test_cases:
+            with self.subTest(description):
+                # Parse the mock current date
+                mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+                
+                # Mock datetime.now() to return our test date
+                with patch('api.calendar.datetime') as mock_datetime:
+                    mock_datetime.now.return_value = mock_current_date
+                    mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                    
+                    # Test the actual function
+                    result_date = parse_week_date(week_title)
+                    
+                    if result_date:
+                        print(f"{description:50} | Current: {current_date_str} | Week: {week_title:25} | Got year: {result_date.year} | Expected: {expected_year}")
+                        self.assertEqual(result_date.year, expected_year, 
+                            f"Year mismatch for {description}. Current date: {current_date_str}, Week: {week_title}")
+                    else:
+                        self.fail(f"Failed to parse date for {description}: {week_title}")
+
+    def test_year_boundary_specific_months(self):
+        """Test specific month combinations that should trigger year adjustments"""
+        print(f"\n=== SPECIFIC MONTH BOUNDARY TEST ===")
+        
+        from unittest.mock import patch
+        
+        # Test December → January (should increment year)
+        december_to_january_cases = [
+            ("2024-12-01", "Week beginning 1 January", 2025),
+            ("2024-12-15", "Week beginning 8 January", 2025),
+            ("2024-12-31", "Week beginning 15 January", 2025),
+            ("2024-12-25", "Week beginning 22 January", 2025),
+        ]
+        
+        print("Testing December → January transitions:")
+        for current_date_str, week_title, expected_year in december_to_january_cases:
+            mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+            
+            with patch('api.calendar.datetime') as mock_datetime:
+                mock_datetime.now.return_value = mock_current_date
+                mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                
+                result_date = parse_week_date(week_title)
+                self.assertIsNotNone(result_date, f"Failed to parse: {week_title}")
+                self.assertEqual(result_date.year, expected_year)
+                print(f"  ✓ {current_date_str} + {week_title} → {result_date.year}")
+        
+        # Test January → December (should decrement year)
+        january_to_december_cases = [
+            ("2025-01-01", "Week beginning 30 December", 2024),
+            ("2025-01-15", "Week beginning 23 December", 2024),
+            ("2025-01-31", "Week beginning 16 December", 2024),
+            ("2025-01-10", "Week beginning 9 December", 2024),
+        ]
+        
+        print("\nTesting January → December transitions:")
+        for current_date_str, week_title, expected_year in january_to_december_cases:
+            mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+            
+            with patch('api.calendar.datetime') as mock_datetime:
+                mock_datetime.now.return_value = mock_current_date
+                mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                
+                result_date = parse_week_date(week_title)
+                self.assertIsNotNone(result_date, f"Failed to parse: {week_title}")
+                self.assertEqual(result_date.year, expected_year)
+                print(f"  ✓ {current_date_str} + {week_title} → {result_date.year}")
+
+    def test_year_boundary_no_false_positives(self):
+        """Test that normal month transitions don't trigger year changes"""
+        print(f"\n=== NO FALSE POSITIVES TEST ===")
+        
+        from unittest.mock import patch
+        
+        # These should NOT trigger year adjustments
+        normal_cases = [
+            ("2025-03-15", "Week beginning 10 March", 2025, "March → March"),
+            ("2025-05-30", "Week beginning 2 June", 2025, "May → June"),
+            ("2025-08-15", "Week beginning 18 August", 2025, "August → August"),
+            ("2025-10-15", "Week beginning 3 November", 2025, "October → November"),
+            ("2025-11-25", "Week beginning 1 December", 2025, "November → December"),
+            ("2025-02-15", "Week beginning 3 March", 2025, "February → March"),
+            ("2025-04-30", "Week beginning 5 May", 2025, "April → May"),
+        ]
+        
+        for current_date_str, week_title, expected_year, description in normal_cases:
+            with self.subTest(description):
+                mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+                
+                with patch('api.calendar.datetime') as mock_datetime:
+                    mock_datetime.now.return_value = mock_current_date
+                    mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                    
+                    result_date = parse_week_date(week_title)
+                    self.assertIsNotNone(result_date, f"Failed to parse: {week_title}")
+                    self.assertEqual(result_date.year, expected_year)
+                    print(f"  ✓ {description:20} | {current_date_str} + {week_title} → {result_date.year} (correct)")
+
+    def test_year_boundary_edge_case_validation(self):
+        """Test edge cases around the exact boundary dates"""
+        print(f"\n=== YEAR BOUNDARY EDGE CASE VALIDATION ===")
+        
+        from unittest.mock import patch
+        
+        # Test various January dates in different contexts
+        edge_cases = [
+            # When it's January 1st, December dates should be previous year
+            ("2025-01-01", "Week beginning 1 January", 2025, "New Year's Day → January same year"),
+            ("2025-01-01", "Week beginning 31 December", 2024, "New Year's Day → December previous year"),
+            
+            # When it's December 31st, January dates should be next year  
+            ("2024-12-31", "Week beginning 31 December", 2024, "New Year's Eve → December same year"),
+            ("2024-12-31", "Week beginning 1 January", 2025, "New Year's Eve → January next year"),
+            
+            # Mid-month scenarios
+            ("2025-01-15", "Week beginning 15 January", 2025, "Mid January → January same year"),
+            ("2025-01-15", "Week beginning 15 December", 2024, "Mid January → December previous year"),
+            ("2024-12-15", "Week beginning 15 December", 2024, "Mid December → December same year"),
+            ("2024-12-15", "Week beginning 15 January", 2025, "Mid December → January next year"),
+        ]
+        
+        for current_date_str, week_title, expected_year, description in edge_cases:
+            with self.subTest(description):
+                mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+                
+                with patch('api.calendar.datetime') as mock_datetime:
+                    mock_datetime.now.return_value = mock_current_date
+                    mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                    
+                    result_date = parse_week_date(week_title)
+                    self.assertIsNotNone(result_date, f"Failed to parse: {week_title}")
+                    self.assertEqual(result_date.year, expected_year, 
+                        f"Wrong year for {description}. Expected {expected_year}, got {result_date.year}")
+                    print(f"  ✓ {description}")
+
+    def test_real_world_scenarios(self):
+        """Test real-world scenarios that might occur"""
+        print(f"\n=== REAL WORLD SCENARIOS TEST ===")
+        
+        from unittest.mock import patch
+        
+        # Realistic scenarios that could happen in practice
+        real_scenarios = [
+            # Gym publishes next week's schedule in December
+            ("2024-12-20", "Week beginning 30 December", 2024, "Late December publishing current year schedule"),
+            ("2024-12-27", "Week beginning 6 January", 2025, "Late December publishing new year schedule"),
+            
+            # Gym publishes schedule in early January for both years
+            ("2025-01-03", "Week beginning 30 December", 2024, "Early January referencing previous year"),
+            ("2025-01-03", "Week beginning 6 January", 2025, "Early January referencing current year"),
+            
+            # Normal operations throughout the year
+            ("2025-05-15", "Week beginning 19 May", 2025, "Normal May operations"),
+            ("2025-09-10", "Week beginning 15 September", 2025, "Normal September operations"),
+        ]
+        
+        for current_date_str, week_title, expected_year, description in real_scenarios:
+            with self.subTest(description):
+                mock_current_date = datetime.strptime(current_date_str, "%Y-%m-%d")
+                
+                with patch('api.calendar.datetime') as mock_datetime:
+                    mock_datetime.now.return_value = mock_current_date
+                    mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+                    
+                    result_date = parse_week_date(week_title)
+                    self.assertIsNotNone(result_date, f"Failed to parse: {week_title}")
+                    self.assertEqual(result_date.year, expected_year)
+                    print(f"  ✓ {description}")
+                    print(f"    Current: {current_date_str}, Week: {week_title} → {result_date.strftime('%Y-%m-%d (%A)')}")
+
     def test_debug_info_boundaries(self):
         """Test that debug info correctly shows boundaries"""
         print(f"\n=== DEBUG INFO BOUNDARIES TEST ===")
@@ -490,6 +696,53 @@ class TestActualCalendarFunctions(unittest.TestCase):
             print("✓ Debug info respects data boundaries")
         else:
             self.fail("No valid event dates found in debug info")
+
+    def test_year_boundary_simple(self):
+        """Simple test for year boundary logic without mocking (current behavior)"""
+        print(f"\n=== SIMPLE YEAR BOUNDARY TEST (Current Implementation) ===")
+        
+        # Test what the current implementation does with these cases
+        # This will fail until we implement the logic, showing what needs to be fixed
+        
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+        
+        print(f"Current date: {datetime.now().strftime('%B %Y')} (month {current_month})")
+        
+        test_cases = [
+            ("Week beginning 1 January", "January date"),
+            ("Week beginning 15 January", "Mid January date"),
+            ("Week beginning 1 December", "December date"),
+            ("Week beginning 25 December", "Late December date"),
+        ]
+        
+        for week_title, description in test_cases:
+            result_date = parse_week_date(week_title)
+            if result_date:
+                print(f"{description:20}: {week_title:25} → {result_date.strftime('%Y-%m-%d')} (year {result_date.year})")
+                
+                # Analyze if this looks correct
+                month_in_title = 1 if 'January' in week_title else 12  # January or December
+                
+                if current_month == 12 and month_in_title == 1:
+                    # We're in December looking at January - should be next year
+                    expected_year = current_year + 1
+                    print(f"    Expected: {expected_year} (December→January should be next year)")
+                elif current_month == 1 and month_in_title == 12:
+                    # We're in January looking at December - should be previous year  
+                    expected_year = current_year - 1
+                    print(f"    Expected: {expected_year} (January→December should be previous year)")
+                else:
+                    # Normal case - same year
+                    expected_year = current_year
+                    print(f"    Expected: {expected_year} (normal case)")
+                
+                if result_date.year != expected_year:
+                    print(f"    ⚠️  ISSUE: Got {result_date.year}, expected {expected_year}")
+                else:
+                    print(f"    ✓ Correct")
+            else:
+                print(f"{description:20}: {week_title:25} → FAILED TO PARSE")
 
 if __name__ == "__main__":
     print("Testing actual functions from api/calendar.py")
