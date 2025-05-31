@@ -1,8 +1,9 @@
-# test_actual_calendar.py
+# test_calendar.py
 import unittest
 import sys
 import os
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 
 # Add the parent directory to the path so we can import from api/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -14,18 +15,22 @@ try:
         parse_week_date, 
         extract_special_notes,
         generate_icalendar,
+        generate_debug_info,
         scrape_velopark_schedule
     )
     print("✓ Successfully imported functions from api/calendar.py")
 except ImportError as e:
     print(f"✗ Failed to import from api/calendar.py: {e}")
-    print("Make sure you're running this from the project root directory")
+    print("Make sure you're running this from the tests directory")
     print("Project structure should be:")
     print("  your-project/")
     print("  ├── api/")
     print("  │   └── calendar.py")
-    print("  ├── tests/")
-    print("  │   └── test_calendar.py")
+    print("  └── tests/")
+    print("      └── test_calendar.py")
+    print("\nRun from tests directory:")
+    print("  cd your-project/tests")
+    print("  python test_calendar.py")
     sys.exit(1)
 
 class TestActualCalendarFunctions(unittest.TestCase):
@@ -120,6 +125,8 @@ class TestActualCalendarFunctions(unittest.TestCase):
         """Test week date parsing using actual function"""
         print(f"\n=== WEEK DATE TEST (using actual function) ===")
         
+        current_year = datetime.now().year
+        
         test_weeks = [
             ("Week beginning 26 May", 26, 5),
             ("Week beginning 2 June", 2, 6),
@@ -132,6 +139,7 @@ class TestActualCalendarFunctions(unittest.TestCase):
                 self.assertIsNotNone(date, f"Failed to parse: {week_title}")
                 self.assertEqual(date.day, expected_day)
                 self.assertEqual(date.month, expected_month)
+                self.assertEqual(date.year, current_year, f"Year should be current year ({current_year})")
                 print(f"{week_title:25} → {date} ({date.strftime('%A')})")
 
     def test_extract_special_notes_actual(self):
@@ -257,14 +265,15 @@ class TestActualCalendarFunctions(unittest.TestCase):
             print(f"Latest event: {latest_date.strftime('%A %d %B %Y')}")
             print(f"Total events: {len(event_dates)}")
             
-            # The latest event should not be beyond June 15, 2025 (end of "Week beginning 9 June")
-            expected_last_date = datetime(2025, 6, 15)  # Sunday of week beginning June 9
+            # The latest event should not be beyond June 15 of current year (end of "Week beginning 9 June")
+            current_year = datetime.now().year
+            expected_last_date = datetime(current_year, 6, 15)  # Sunday of week beginning June 9
             
             self.assertLessEqual(latest_date, expected_last_date, 
                 f"Events found beyond available data! Latest event: {latest_date}, Expected max: {expected_last_date}")
             
             # Check that we have events in the expected range
-            expected_first_date = datetime(2025, 5, 26)  # Monday of week beginning May 26
+            expected_first_date = datetime(current_year, 5, 26)  # Monday of week beginning May 26
             self.assertGreaterEqual(earliest_date, expected_first_date,
                 f"Events found before expected start! Earliest event: {earliest_date}, Expected min: {expected_first_date}")
             
@@ -290,11 +299,12 @@ class TestActualCalendarFunctions(unittest.TestCase):
         # Find all event dates
         dtstart_matches = re.findall(r'DTSTART:(\d{8})', ics_content)
         
+        current_year = datetime.now().year
         prohibited_dates = [
-            datetime(2025, 6, 16),  # Monday after last week
-            datetime(2025, 6, 17),  # Tuesday after last week
-            datetime(2025, 6, 22),  # The following week
-            datetime(2025, 7, 1),   # July (definitely beyond data)
+            datetime(current_year, 6, 16),  # Monday after last week
+            datetime(current_year, 6, 17),  # Tuesday after last week
+            datetime(current_year, 6, 22),  # The following week
+            datetime(current_year, 7, 1),   # July (definitely beyond data)
         ]
         
         events_beyond_data = []
@@ -333,11 +343,12 @@ class TestActualCalendarFunctions(unittest.TestCase):
             weeks_ahead=8
         )
         
-        # Expected weeks and their date ranges
+        # Expected weeks and their date ranges (using current year)
+        current_year = datetime.now().year
         expected_weeks = [
-            ("Week beginning 26 May", datetime(2025, 5, 26), datetime(2025, 6, 1)),
-            ("Week beginning 2 June", datetime(2025, 6, 2), datetime(2025, 6, 8)),
-            ("Week beginning 9 June", datetime(2025, 6, 9), datetime(2025, 6, 15)),
+            ("Week beginning 26 May", datetime(current_year, 5, 26), datetime(current_year, 6, 1)),
+            ("Week beginning 2 June", datetime(current_year, 6, 2), datetime(current_year, 6, 8)),
+            ("Week beginning 9 June", datetime(current_year, 6, 9), datetime(current_year, 6, 15)),
         ]
         
         # Extract event dates
@@ -416,12 +427,13 @@ class TestActualCalendarFunctions(unittest.TestCase):
         event_dates.sort()
         
         # Check for events that would indicate week 4 repetition (June 16-22)
-        week4_start = datetime(2025, 6, 16)
-        week4_end = datetime(2025, 6, 22)
+        current_year = datetime.now().year
+        week4_start = datetime(current_year, 6, 16)
+        week4_end = datetime(current_year, 6, 22)
         
         # Check for events that would indicate week 5 repetition (June 23-29)
-        week5_start = datetime(2025, 6, 23)
-        week5_end = datetime(2025, 6, 29)
+        week5_start = datetime(current_year, 6, 23)
+        week5_end = datetime(current_year, 6, 29)
         
         repetition_events = []
         for event_date in event_dates:
@@ -469,8 +481,9 @@ class TestActualCalendarFunctions(unittest.TestCase):
             print(f"Debug info shows events from {earliest.strftime('%d %b')} to {latest.strftime('%d %b')}")
             print(f"Total events in debug info: {len(calendar_events)}")
             
-            # Should not go beyond June 15, 2025
-            max_expected = datetime(2025, 6, 15)
+            # Should not go beyond June 15 of current year
+            current_year = datetime.now().year
+            max_expected = datetime(current_year, 6, 15)
             self.assertLessEqual(latest, max_expected, 
                 f"Debug info shows events beyond expected boundary: {latest} > {max_expected}")
             

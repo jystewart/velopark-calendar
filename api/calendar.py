@@ -131,8 +131,8 @@ def parse_week_date(week_title):
     day = int(match.group(1))
     month_name = match.group(2).lower()
     
-    # Use 2025 as the year for current context
-    year = 2025
+    # Use the current year when the code is run
+    year = datetime.now().year
     
     months = {
         'january': 1, 'jan': 1,
