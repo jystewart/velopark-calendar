@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/calendar.py": {
-      "runtime": "@vercel/python"
-    }
-  }
-}
