@@ -166,7 +166,7 @@ def parse_time_slots(times_str):
     # Remove content inside parentheses first (these are notes, not actual session times)
     # This prevents times like "(16:30-17:30 Abercrombie loop only)" from being parsed as sessions
     cleaned_str = re.sub(r'\([^)]*\)', '', times_str)
-
+    
     # Normalize the string - replace multiple spaces with single space
     normalized = re.sub(r'\s+', ' ', cleaned_str.strip())
     
@@ -185,7 +185,7 @@ def parse_time_slots(times_str):
             start_time, end_time = clean_range.split('-', 1)
             
             # Validate time format (exactly HH:MM)
-            if (re.match(r'^\d{2}:\d{2}$', start_time) and
+            if (re.match(r'^\d{2}:\d{2}$', start_time) and 
                 re.match(r'^\d{2}:\d{2}$', end_time)):
                 slots.append((start_time, end_time))
     
@@ -214,65 +214,62 @@ def generate_icalendar(schedule_data, calendar_name, include_notes, weeks_ahead)
     event_count = 0
     day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     
-    # Process each week in the schedule
+    # Process each week in the schedule data (only generate events for weeks with actual data)
     for week_title, week_data in schedule_data.items():
         week_start_date = parse_week_date(week_title)
         if not week_start_date:
             continue
         
-        # Generate events for the current week and repeat for weeks ahead
-        for week_offset in range(0, weeks_ahead, len(schedule_data)):
-            current_week_start = week_start_date + timedelta(weeks=week_offset // len(schedule_data))
+        # Only generate events for this specific week (no repetition beyond available data)
+        for day_name, times_str in week_data.items():
+            if day_name not in day_names:
+                continue
             
-            for day_name, times_str in week_data.items():
-                if day_name not in day_names:
-                    continue
+            day_index = day_names.index(day_name)
+            event_date = week_start_date + timedelta(days=day_index)
+            
+            # Parse time slots for this day
+            time_slots = parse_time_slots(times_str)
+            special_notes = extract_special_notes(times_str)
+            
+            # Create events for each time slot
+            for slot_index, (start_time, end_time) in enumerate(time_slots):
+                event_count += 1
                 
-                day_index = day_names.index(day_name)
-                event_date = current_week_start + timedelta(days=day_index)
+                # Format date and time for iCalendar
+                date_str = event_date.strftime('%Y%m%d')
+                start_time_str = start_time.replace(':', '')
+                end_time_str = end_time.replace(':', '')
                 
-                # Parse time slots for this day
-                time_slots = parse_time_slots(times_str)
-                special_notes = extract_special_notes(times_str)
+                # Create unique ID
+                uid = f"velopark-{date_str}-{start_time_str}-{slot_index}@leovalley.org.uk"
                 
-                # Create events for each time slot
-                for slot_index, (start_time, end_time) in enumerate(time_slots):
-                    event_count += 1
-                    
-                    # Format date and time for iCalendar
-                    date_str = event_date.strftime('%Y%m%d')
-                    start_time_str = start_time.replace(':', '')
-                    end_time_str = end_time.replace(':', '')
-                    
-                    # Create unique ID
-                    uid = f"velopark-{date_str}-{start_time_str}-{slot_index}@leovalley.org.uk"
-                    
-                    # Create summary
-                    summary = "Lee Valley VeloPark - Road Circuit Open"
-                    if len(time_slots) > 1:
-                        summary += f" (Session {slot_index + 1})"
-                    
-                    # Create description
-                    description = "Road cycling circuit is open for sessions and activities. Last entry one hour before closing."
-                    if include_notes and special_notes:
-                        description += f" {special_notes}"
-                    
-                    # Current timestamp
-                    now_str = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
-                    
-                    # Add event to calendar
-                    ics_lines.extend([
-                        "BEGIN:VEVENT",
-                        f"UID:{uid}",
-                        f"DTSTART:{date_str}T{start_time_str}00",
-                        f"DTEND:{date_str}T{end_time_str}00",
-                        f"SUMMARY:{summary}",
-                        f"DESCRIPTION:{description}",
-                        "LOCATION:Lee Valley VeloPark, Abercrombie Road, Queen Elizabeth Olympic Park, London E20 3AB",
-                        "URL:https://www.better.org.uk/leisure-centre/lee-valley/velopark/road-cycling",
-                        f"DTSTAMP:{now_str}",
-                        "END:VEVENT"
-                    ])
+                # Create summary
+                summary = "Lee Valley VeloPark - Road Circuit Open"
+                if len(time_slots) > 1:
+                    summary += f" (Session {slot_index + 1})"
+                
+                # Create description
+                description = "Road cycling circuit is open for sessions and activities. Last entry one hour before closing."
+                if include_notes and special_notes:
+                    description += f" {special_notes}"
+                
+                # Current timestamp
+                now_str = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+                
+                # Add event to calendar
+                ics_lines.extend([
+                    "BEGIN:VEVENT",
+                    f"UID:{uid}",
+                    f"DTSTART:{date_str}T{start_time_str}00",
+                    f"DTEND:{date_str}T{end_time_str}00",
+                    f"SUMMARY:{summary}",
+                    f"DESCRIPTION:{description}",
+                    "LOCATION:Lee Valley VeloPark, Abercrombie Road, Queen Elizabeth Olympic Park, London E20 3AB",
+                    "URL:https://www.better.org.uk/leisure-centre/lee-valley/velopark/road-cycling",
+                    f"DTSTAMP:{now_str}",
+                    "END:VEVENT"
+                ])
     
     # Close calendar
     ics_lines.append("END:VCALENDAR")
