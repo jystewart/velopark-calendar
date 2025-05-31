@@ -19,11 +19,20 @@ class handler(BaseHTTPRequestHandler):
             include_notes = query_params.get('notes', ['true'])[0].lower() == 'true'
             weeks_ahead = int(query_params.get('weeks', ['8'])[0])
             format_type = query_params.get('format', ['ics'])[0]
+            debug = query_params.get('debug', ['false'])[0].lower() == 'true'
             
             # Scrape the VeloPark website
             schedule_data = scrape_velopark_schedule()
             
-            if format_type == 'json':
+            if debug or format_type == 'debug':
+                # Return detailed debug information
+                debug_info = generate_debug_info(schedule_data, weeks_ahead)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(debug_info, indent=2, default=str).encode())
+            elif format_type == 'json':
                 # Return JSON for debugging
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -115,19 +124,15 @@ def scrape_velopark_schedule():
 
 def parse_week_date(week_title):
     """Parse week title like 'Week beginning 26 May' into a date"""
-    match = re.search(r'Week beginning (\d+) (\w+)', week_title)
+    match = re.search(r'Week beginning (\d+) (\w+)', week_title, re.IGNORECASE)
     if not match:
         return None
     
     day = int(match.group(1))
-    month_name = match.group(2)
-    year = datetime.now().year
+    month_name = match.group(2).lower()
     
-    # Handle year boundary (if it's December and we see January dates, use next year)
-    if datetime.now().month == 12 and month_name.lower() in ['january', 'jan']:
-        year += 1
-    elif datetime.now().month <= 2 and month_name.lower() in ['november', 'december', 'nov', 'dec']:
-        year -= 1
+    # Use 2025 as the year for current context
+    year = 2025
     
     months = {
         'january': 1, 'jan': 1,
@@ -144,7 +149,7 @@ def parse_week_date(week_title):
         'december': 12, 'dec': 12
     }
     
-    month = months.get(month_name.lower())
+    month = months.get(month_name)
     if not month:
         return None
     
@@ -158,11 +163,304 @@ def parse_time_slots(times_str):
     if 'closed' in times_str.lower():
         return []
     
-    # Find all time ranges in format HH:MM-HH:MM
-    time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', times_str)
+    # Normalize the string - replace multiple spaces with single space
+    normalized = re.sub(r'\s+', ' ', times_str.strip())
+    
+    # Handle cases where times might be stuck together (e.g., "14:0016:00")
+    # Insert space before a time that follows another time
+    normalized = re.sub(r'(\d{2}:\d{2})(\d{2}:\d{2})', r'\1 \2', normalized)
+    
+    # Find all time ranges in format HH:MM-HH:MM with optional spaces around dash
+    time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', normalized)
     
     slots = []
     for time_range in time_ranges:
+        # Remove all spaces and split on dash
+        clean_range = re.sub(r'\s', '', time_range)
+        if '-' in clean_range:
+            start_time, end_time = clean_range.split('-', 1)
+            
+            # Validate time format (exactly HH:MM)
+            if (re.match(r'^\d{2}:\d{2}range in time_ranges:
+        # Clean up the range and split
+        clean_range = time_range.replace(' ', '')
+        start_time, end_time = clean_range.split('-')
+        
+        # Validate time format
+        if re.match(r'\d{2}:\d{2}', start_time) and re.match(r'\d{2}:\d{2}', end_time):
+            slots.append((start_time, end_time))
+    
+    return slots
+
+def extract_special_notes(times_str):
+    """Extract special notes like '(Bank Holiday)' or '(Abercrombie loop only)'"""
+    notes = re.findall(r'\([^)]+\)', times_str)
+    return ' '.join(notes) if notes else ''
+
+def generate_icalendar(schedule_data, calendar_name, include_notes, weeks_ahead):
+    """Generate iCalendar content from schedule data"""
+    
+    # iCalendar header
+    ics_lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Lee Valley VeloPark//Road Cycling Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{calendar_name}",
+        "X-WR-CALDESC:Lee Valley VeloPark Road Cycling opening hours - Auto-updated from website",
+        "X-WR-TIMEZONE:Europe/London"
+    ]
+    
+    event_count = 0
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    # Process each week in the schedule
+    for week_title, week_data in schedule_data.items():
+        week_start_date = parse_week_date(week_title)
+        if not week_start_date:
+            continue
+        
+        # Generate events for the current week and repeat for weeks ahead
+        for week_offset in range(0, weeks_ahead, len(schedule_data)):
+            current_week_start = week_start_date + timedelta(weeks=week_offset // len(schedule_data))
+            
+            for day_name, times_str in week_data.items():
+                if day_name not in day_names:
+                    continue
+                
+                day_index = day_names.index(day_name)
+                event_date = current_week_start + timedelta(days=day_index)
+                
+                # Parse time slots for this day
+                time_slots = parse_time_slots(times_str)
+                special_notes = extract_special_notes(times_str)
+                
+                # Create events for each time slot
+                for slot_index, (start_time, end_time) in enumerate(time_slots):
+                    event_count += 1
+                    
+                    # Format date and time for iCalendar
+                    date_str = event_date.strftime('%Y%m%d')
+                    start_time_str = start_time.replace(':', '')
+                    end_time_str = end_time.replace(':', '')
+                    
+                    # Create unique ID
+                    uid = f"velopark-{date_str}-{start_time_str}-{slot_index}@leovalley.org.uk"
+                    
+                    # Create summary
+                    summary = "Lee Valley VeloPark - Road Circuit Open"
+                    if len(time_slots) > 1:
+                        summary += f" (Session {slot_index + 1})"
+                    
+                    # Create description
+                    description = "Road cycling circuit is open for sessions and activities. Last entry one hour before closing."
+                    if include_notes and special_notes:
+                        description += f" {special_notes}"
+                    
+                    # Current timestamp
+                    now_str = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+                    
+                    # Add event to calendar
+                    ics_lines.extend([
+                        "BEGIN:VEVENT",
+                        f"UID:{uid}",
+                        f"DTSTART:{date_str}T{start_time_str}00",
+                        f"DTEND:{date_str}T{end_time_str}00",
+                        f"SUMMARY:{summary}",
+                        f"DESCRIPTION:{description}",
+                        "LOCATION:Lee Valley VeloPark, Abercrombie Road, Queen Elizabeth Olympic Park, London E20 3AB",
+                        "URL:https://www.better.org.uk/leisure-centre/lee-valley/velopark/road-cycling",
+                        f"DTSTAMP:{now_str}",
+                        "END:VEVENT"
+                    ])
+    
+    # Close calendar
+    ics_lines.append("END:VCALENDAR")
+    
+    return "\r\n".join(ics_lines)
+
+def generate_debug_info(schedule_data, weeks_ahead):
+    """Generate detailed debug information for troubleshooting"""
+    debug_info = {
+        "schedule_data": schedule_data,
+        "parsing_results": {},
+        "calendar_events": [],
+        "issues_found": []
+    }
+    
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    # Process each week and show parsing details
+    for week_title, week_data in schedule_data.items():
+        week_start_date = parse_week_date(week_title)
+        
+        debug_info["parsing_results"][week_title] = {
+            "week_start_date": week_start_date,
+            "days": {}
+        }
+        
+        if not week_start_date:
+            debug_info["issues_found"].append(f"Could not parse week date: {week_title}")
+            continue
+        
+        for day_name, times_str in week_data.items():
+            if day_name not in day_names:
+                continue
+            
+            day_index = day_names.index(day_name)
+            event_date = week_start_date + timedelta(days=day_index)
+            
+            # Parse time slots and show details
+            time_slots = parse_time_slots(times_str)
+            special_notes = extract_special_notes(times_str)
+            
+            day_debug = {
+                "original_text": times_str,
+                "parsed_slots": time_slots,
+                "special_notes": special_notes,
+                "event_date": event_date,
+                "day_of_week": event_date.strftime('%A')
+            }
+            
+            debug_info["parsing_results"][week_title]["days"][day_name] = day_debug
+            
+            # Check for specific issues
+            if day_name == "Friday" and "07:00-14:00 16:00-21:00" in times_str:
+                if len(time_slots) != 2:
+                    debug_info["issues_found"].append(
+                        f"Friday parsing issue: expected 2 slots, got {len(time_slots)} for '{times_str}'"
+                    )
+            
+            # Generate events for this day
+            for slot_index, (start_time, end_time) in enumerate(time_slots):
+                summary = "Lee Valley VeloPark - Road Circuit Open"
+                if len(time_slots) > 1:
+                    summary += f" (Session {slot_index + 1})"
+                
+                event = {
+                    "date": event_date.strftime('%Y-%m-%d'),
+                    "day_name": day_name,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "summary": summary,
+                    "session_number": slot_index + 1,
+                    "total_sessions": len(time_slots),
+                    "original_text": times_str,
+                    "special_notes": special_notes
+                }
+                
+                debug_info["calendar_events"].append(event)
+    
+    # Add summary statistics
+    debug_info["summary"] = {
+        "total_weeks": len(schedule_data),
+        "total_events": len(debug_info["calendar_events"]),
+        "issues_count": len(debug_info["issues_found"])
+    }
+    
+    return debug_info, start_time) and 
+                re.match(r'^\d{2}:\d{2}range in time_ranges:
+        # Clean up the range and split
+        clean_range = time_range.replace(' ', '')
+        start_time, end_time = clean_range.split('-')
+        
+        # Validate time format
+        if re.match(r'\d{2}:\d{2}', start_time) and re.match(r'\d{2}:\d{2}', end_time):
+            slots.append((start_time, end_time))
+    
+    return slots
+
+def extract_special_notes(times_str):
+    """Extract special notes like '(Bank Holiday)' or '(Abercrombie loop only)'"""
+    notes = re.findall(r'\([^)]+\)', times_str)
+    return ' '.join(notes) if notes else ''
+
+def generate_icalendar(schedule_data, calendar_name, include_notes, weeks_ahead):
+    """Generate iCalendar content from schedule data"""
+    
+    # iCalendar header
+    ics_lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Lee Valley VeloPark//Road Cycling Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{calendar_name}",
+        "X-WR-CALDESC:Lee Valley VeloPark Road Cycling opening hours - Auto-updated from website",
+        "X-WR-TIMEZONE:Europe/London"
+    ]
+    
+    event_count = 0
+    day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    
+    # Process each week in the schedule
+    for week_title, week_data in schedule_data.items():
+        week_start_date = parse_week_date(week_title)
+        if not week_start_date:
+            continue
+        
+        # Generate events for the current week and repeat for weeks ahead
+        for week_offset in range(0, weeks_ahead, len(schedule_data)):
+            current_week_start = week_start_date + timedelta(weeks=week_offset // len(schedule_data))
+            
+            for day_name, times_str in week_data.items():
+                if day_name not in day_names:
+                    continue
+                
+                day_index = day_names.index(day_name)
+                event_date = current_week_start + timedelta(days=day_index)
+                
+                # Parse time slots for this day
+                time_slots = parse_time_slots(times_str)
+                special_notes = extract_special_notes(times_str)
+                
+                # Create events for each time slot
+                for slot_index, (start_time, end_time) in enumerate(time_slots):
+                    event_count += 1
+                    
+                    # Format date and time for iCalendar
+                    date_str = event_date.strftime('%Y%m%d')
+                    start_time_str = start_time.replace(':', '')
+                    end_time_str = end_time.replace(':', '')
+                    
+                    # Create unique ID
+                    uid = f"velopark-{date_str}-{start_time_str}-{slot_index}@leovalley.org.uk"
+                    
+                    # Create summary
+                    summary = "Lee Valley VeloPark - Road Circuit Open"
+                    if len(time_slots) > 1:
+                        summary += f" (Session {slot_index + 1})"
+                    
+                    # Create description
+                    description = "Road cycling circuit is open for sessions and activities. Last entry one hour before closing."
+                    if include_notes and special_notes:
+                        description += f" {special_notes}"
+                    
+                    # Current timestamp
+                    now_str = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+                    
+                    # Add event to calendar
+                    ics_lines.extend([
+                        "BEGIN:VEVENT",
+                        f"UID:{uid}",
+                        f"DTSTART:{date_str}T{start_time_str}00",
+                        f"DTEND:{date_str}T{end_time_str}00",
+                        f"SUMMARY:{summary}",
+                        f"DESCRIPTION:{description}",
+                        "LOCATION:Lee Valley VeloPark, Abercrombie Road, Queen Elizabeth Olympic Park, London E20 3AB",
+                        "URL:https://www.better.org.uk/leisure-centre/lee-valley/velopark/road-cycling",
+                        f"DTSTAMP:{now_str}",
+                        "END:VEVENT"
+                    ])
+    
+    # Close calendar
+    ics_lines.append("END:VCALENDAR")
+    
+    return "\r\n".join(ics_lines), end_time)):
+                slots.append((start_time, end_time))
+    
+    return slotsrange in time_ranges:
         # Clean up the range and split
         clean_range = time_range.replace(' ', '')
         start_time, end_time = clean_range.split('-')
