@@ -33,6 +33,115 @@ except ImportError as e:
     print("  python test_calendar.py")
     sys.exit(1)
 
+class TestParsingFlexibility(unittest.TestCase):
+    """Test parsing flexibility for inconsistent data formats"""
+    
+    def test_day_time_separator_variations(self):
+        """Test various day-time separator formats"""
+        print(f"\n=== DAY-TIME SEPARATOR FLEXIBILITY TESTS ===")
+        
+        # These test cases show the current parsing would fail
+        problematic_formats = [
+            "Friday- 07:00- 21:00",           # No space before first hyphen
+            "Friday -07:00- 21:00",           # No space after first hyphen  
+            "Friday-07:00- 21:00",            # No spaces around first hyphen
+            "Friday - 07:00-21:00",           # No space before second hyphen
+            "Friday - 07:00 -21:00",          # No space after second hyphen
+            "Friday - 07:00-21:00",           # No spaces around second hyphen
+            "Friday - 07:00 - 21:00",         # Current expected format (should work)
+        ]
+        
+        print("Current parsing would fail on these formats:")
+        for i, format_str in enumerate(problematic_formats, 1):
+            print(f"  {i}. {format_str}")
+        
+        # Test what happens with current parsing
+        print(f"\nTesting current parsing behavior:")
+        for format_str in problematic_formats:
+            parts = format_str.split(' - ', 1)
+            if len(parts) >= 2:
+                day = parts[0].strip()
+                times = parts[1].strip()
+                print(f"  ✓ '{format_str}' → Day: '{day}', Times: '{times}'")
+            else:
+                print(f"  ✗ '{format_str}' → FAILED TO PARSE")
+
+    def test_time_format_variations(self):
+        """Test various time format inconsistencies"""
+        print(f"\n=== TIME FORMAT FLEXIBILITY TESTS ===")
+        
+        time_variations = [
+            "07:00- 21:00",                   # Space after first hyphen
+            "07:00 -21:00",                   # Space before second hyphen
+            "07:00-21:00",                    # No spaces around hyphen
+            "07:00 - 21:00",                  # Spaces around hyphen
+            "07:00-14:00 16:00-21:00",        # Multiple sessions, no spaces
+            "07:00-14:00 16:00 - 21:00",      # Multiple sessions, mixed spacing
+            "07:00 - 14:00 and 16:00 - 21:00", # Multiple sessions with 'and'
+            "07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", # Three sessions with 'and'
+            "07:30- 18:00",                   # Different minutes, space after hyphen
+        ]
+        
+        print("Time format variations that need flexible parsing:")
+        for i, time_str in enumerate(time_variations, 1):
+            print(f"  {i}. {time_str}")
+        
+        # Test current parsing
+        print(f"\nTesting current parse_time_slots behavior:")
+        for time_str in time_variations:
+            slots = parse_time_slots(time_str)
+            print(f"  '{time_str}' → {len(slots)} slots: {slots}")
+
+    def test_complex_format_combinations(self):
+        """Test complex combinations of formatting issues"""
+        print(f"\n=== COMPLEX FORMAT COMBINATIONS ===")
+        
+        complex_cases = [
+            "Wednesday - 07:00 - 16:00 and 18:00-19:00",
+            "Thursday - 07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00",
+            "Friday- 07:00- 21:00",
+            "Saturday - 07:30- 18:00",
+            "Sunday - 07:30 - 18:00",
+        ]
+        
+        print("Complex cases from your example:")
+        for case in complex_cases:
+            print(f"  {case}")
+        
+        print(f"\nCurrent parsing results:")
+        for case in complex_cases:
+            # Use the new flexible parsing function
+            from api.calendar import parse_day_time_flexible
+            day, times = parse_day_time_flexible(case)
+            if day and times:
+                slots = parse_time_slots(times)
+                print(f"  '{case}' → Day: '{day}', Times: '{times}' → {len(slots)} slots")
+            else:
+                print(f"  '{case}' → FAILED TO PARSE DAY-TIME SEPARATION")
+
+    def test_expected_behavior_after_fixes(self):
+        """Test what the behavior should be after implementing flexible parsing"""
+        print(f"\n=== EXPECTED BEHAVIOR AFTER FIXES ===")
+        
+        # This is what we want to achieve
+        expected_results = [
+            ("Monday - 07:00- 21:00", "Monday", "07:00- 21:00", [("07:00", "21:00")]),
+            ("Tuesday - 16:00 - 21:00", "Tuesday", "16:00 - 21:00", [("16:00", "21:00")]),
+            ("Wednesday - 07:00 - 16:00 and 18:00-19:00", "Wednesday", "07:00 - 16:00 and 18:00-19:00", [("07:00", "16:00"), ("18:00", "19:00")]),
+            ("Thursday - 07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", "Thursday", "07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", [("07:00", "10:00"), ("11:00", "14:00"), ("16:00", "21:00")]),
+            ("Friday- 07:00- 21:00", "Friday", "07:00- 21:00", [("07:00", "21:00")]),
+            ("Saturday - 07:30- 18:00", "Saturday", "07:30- 18:00", [("07:30", "18:00")]),
+            ("Sunday - 07:30 - 18:00", "Sunday", "07:30 - 18:00", [("07:30", "18:00")]),
+        ]
+        
+        print("Expected parsing results after implementing flexible parsing:")
+        for input_str, expected_day, expected_times, expected_slots in expected_results:
+            print(f"  Input: {input_str}")
+            print(f"    → Day: {expected_day}")
+            print(f"    → Times: {expected_times}")
+            print(f"    → Slots: {expected_slots}")
+            print()
+
 class TestActualCalendarFunctions(unittest.TestCase):
     
     def setUp(self):
@@ -743,6 +852,111 @@ class TestActualCalendarFunctions(unittest.TestCase):
                     print(f"    ✓ Correct")
             else:
                 print(f"{description:20}: {week_title:25} → FAILED TO PARSE")
+
+class TestFlexibleParsingImplementation(unittest.TestCase):
+    """Test the new flexible parsing implementation"""
+    
+    def test_parse_day_time_flexible(self):
+        """Test the new flexible day-time parsing function"""
+        print(f"\n=== FLEXIBLE DAY-TIME PARSING TESTS ===")
+        
+        # Import the new function
+        from api.calendar import parse_day_time_flexible
+        
+        test_cases = [
+            ("Monday - 07:00- 21:00", "Monday", "07:00- 21:00"),
+            ("Tuesday - 16:00 - 21:00", "Tuesday", "16:00 - 21:00"),
+            ("Wednesday - 07:00 - 16:00 and 18:00-19:00", "Wednesday", "07:00 - 16:00 and 18:00-19:00"),
+            ("Thursday - 07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", "Thursday", "07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00"),
+            ("Friday- 07:00- 21:00", "Friday", "07:00- 21:00"),  # This was failing before!
+            ("Saturday - 07:30- 18:00", "Saturday", "07:30- 18:00"),
+            ("Sunday - 07:30 - 18:00", "Sunday", "07:30 - 18:00"),
+            # Edge cases
+            ("Friday -07:00- 21:00", "Friday", "07:00- 21:00"),
+            ("Friday-07:00- 21:00", "Friday", "07:00- 21:00"),
+            # Invalid cases
+            ("Invalid - 07:00-21:00", None, None),
+            ("Random text", None, None),
+        ]
+        
+        for input_str, expected_day, expected_times in test_cases:
+            with self.subTest(input_str):
+                day, times = parse_day_time_flexible(input_str)
+                if expected_day is None:
+                    self.assertIsNone(day, f"Should fail to parse: {input_str}")
+                    self.assertIsNone(times, f"Should fail to parse: {input_str}")
+                else:
+                    self.assertEqual(day, expected_day, f"Day parsing failed for: {input_str}")
+                    self.assertEqual(times, expected_times, f"Times parsing failed for: {input_str}")
+                    print(f"  ✓ '{input_str}' → Day: '{day}', Times: '{times}'")
+
+    def test_enhanced_time_slots_parsing(self):
+        """Test the enhanced time slots parsing with 'and' separators"""
+        print(f"\n=== ENHANCED TIME SLOTS PARSING TESTS ===")
+        
+        test_cases = [
+            ("07:00- 21:00", [("07:00", "21:00")]),
+            ("07:00 -21:00", [("07:00", "21:00")]),
+            ("07:00-21:00", [("07:00", "21:00")]),
+            ("07:00 - 21:00", [("07:00", "21:00")]),
+            ("07:00-14:00 16:00-21:00", [("07:00", "14:00"), ("16:00", "21:00")]),
+            ("07:00-14:00 16:00 - 21:00", [("07:00", "14:00"), ("16:00", "21:00")]),
+            ("07:00 - 14:00 and 16:00 - 21:00", [("07:00", "14:00"), ("16:00", "21:00")]),
+            ("07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", [("07:00", "10:00"), ("11:00", "14:00"), ("16:00", "21:00")]),
+            ("07:30- 18:00", [("07:30", "18:00")]),
+            # Complex cases from your example
+            ("07:00 - 16:00 and 18:00-19:00", [("07:00", "16:00"), ("18:00", "19:00")]),
+            ("07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00", [("07:00", "10:00"), ("11:00", "14:00"), ("16:00", "21:00")]),
+            ("07:00- 21:00", [("07:00", "21:00")]),
+            ("07:30- 18:00", [("07:30", "18:00")]),
+            ("07:30 - 18:00", [("07:30", "18:00")]),
+        ]
+        
+        for input_str, expected_slots in test_cases:
+            with self.subTest(input_str):
+                slots = parse_time_slots(input_str)
+                self.assertEqual(slots, expected_slots, f"Failed for: {input_str}")
+                print(f"  ✓ '{input_str}' → {len(slots)} slots: {slots}")
+
+    def test_integration_with_problematic_formats(self):
+        """Test the complete integration with the problematic formats from your example"""
+        print(f"\n=== INTEGRATION TEST WITH PROBLEMATIC FORMATS ===")
+        
+        from api.calendar import parse_day_time_flexible
+        
+        # Your example data
+        problematic_formats = [
+            "Monday - 07:00- 21:00",
+            "Tuesday - 16:00 - 21:00", 
+            "Wednesday - 07:00 - 16:00 and 18:00-19:00",
+            "Thursday - 07:00 - 10:00 and 11:00 - 14:00 and 16:00 - 21:00",
+            "Friday- 07:00- 21:00",  # This was the main problem!
+            "Saturday - 07:30- 18:00",
+            "Sunday - 07:30 - 18:00",
+        ]
+        
+        expected_results = [
+            ("Monday", [("07:00", "21:00")]),
+            ("Tuesday", [("16:00", "21:00")]),
+            ("Wednesday", [("07:00", "16:00"), ("18:00", "19:00")]),
+            ("Thursday", [("07:00", "10:00"), ("11:00", "14:00"), ("16:00", "21:00")]),
+            ("Friday", [("07:00", "21:00")]),
+            ("Saturday", [("07:30", "18:00")]),
+            ("Sunday", [("07:30", "18:00")]),
+        ]
+        
+        for i, (input_str, (expected_day, expected_slots)) in enumerate(zip(problematic_formats, expected_results)):
+            with self.subTest(f"Case {i+1}: {input_str}"):
+                # Test day-time separation
+                day, times = parse_day_time_flexible(input_str)
+                self.assertEqual(day, expected_day, f"Day parsing failed for: {input_str}")
+                self.assertIsNotNone(times, f"Times parsing failed for: {input_str}")
+                
+                # Test time slots parsing
+                slots = parse_time_slots(times)
+                self.assertEqual(slots, expected_slots, f"Time slots parsing failed for: {input_str}")
+                
+                print(f"  ✓ '{input_str}' → Day: '{day}', Slots: {slots}")
 
 if __name__ == "__main__":
     print("Testing actual functions from api/calendar.py")

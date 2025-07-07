@@ -59,6 +59,41 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(error_message.encode())
 
+def parse_day_time_flexible(text):
+    """
+    Flexibly parse day and time from text like:
+    - "Monday - 07:00- 21:00"
+    - "Friday- 07:00- 21:00" 
+    - "Wednesday - 07:00 - 16:00 and 18:00-19:00"
+    
+    Returns (day, times) or (None, None) if parsing fails
+    """
+    # Normalize whitespace first
+    text = re.sub(r'\s+', ' ', text.strip())
+    
+    # Try multiple patterns for day-time separation
+    patterns = [
+        # Pattern 1: "Day - times" (current expected format)
+        r'^([A-Za-z]+)\s*-\s*(.+)$',
+        # Pattern 2: "Day-times" (no space before hyphen)
+        r'^([A-Za-z]+)-\s*(.+)$',
+        # Pattern 3: "Day -times" (no space after hyphen)
+        r'^([A-Za-z]+)\s*-(.+)$',
+    ]
+    
+    for pattern in patterns:
+        match = re.match(pattern, text)
+        if match:
+            day = match.group(1).strip()
+            times = match.group(2).strip()
+            
+            # Validate day name
+            valid_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            if day in valid_days:
+                return day, times
+    
+    return None, None
+
 def scrape_velopark_schedule():
     """Scrape the Lee Valley VeloPark website for opening hours"""
     url = "https://www.better.org.uk/leisure-centre/lee-valley/velopark/road-cycling"
@@ -102,11 +137,9 @@ def scrape_velopark_schedule():
             
             for item in list_items:
                 text = item.get_text(strip=True)
-                # Parse "Monday - 07:00 - 21:00" format
-                parts = text.split(' - ', 1)
-                if len(parts) >= 2:
-                    day = parts[0].strip()
-                    times = parts[1].strip()
+                # Use flexible parsing instead of simple split
+                day, times = parse_day_time_flexible(text)
+                if day and times:
                     week_data[day] = times
             
             if week_data:
@@ -169,7 +202,7 @@ def parse_week_date(week_title):
         return None
 
 def parse_time_slots(times_str):
-    """Parse time strings like '07:00-21:00' or '07:00-14:00 16:00-21:00'"""
+    """Parse time strings like '07:00-21:00' or '07:00-14:00 16:00-21:00' or '07:00 - 14:00 and 16:00 - 21:00'"""
     if 'closed' in times_str.lower():
         return []
     
@@ -180,24 +213,36 @@ def parse_time_slots(times_str):
     # Normalize the string - replace multiple spaces with single space
     normalized = re.sub(r'\s+', ' ', cleaned_str.strip())
     
-    # Handle cases where times might be stuck together (e.g., "14:0016:00")
-    # Insert space before a time that follows another time
-    normalized = re.sub(r'(\d{2}:\d{2})(\d{2}:\d{2})', r'\1 \2', normalized)
-    
-    # Find all time ranges in format HH:MM-HH:MM with optional spaces around dash
-    time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', normalized)
+    # Split on common separators: space, "and", comma
+    # This handles formats like:
+    # "07:00-14:00 16:00-21:00" (space separated)
+    # "07:00 - 14:00 and 16:00 - 21:00" (and separated)
+    # "07:00-10:00, 11:00-14:00" (comma separated)
+    time_parts = re.split(r'\s+(?:and|&)\s+|\s{2,}|,\s*', normalized)
     
     slots = []
-    for time_range in time_ranges:
-        # Remove all spaces and split on dash
-        clean_range = re.sub(r'\s', '', time_range)
-        if '-' in clean_range:
-            start_time, end_time = clean_range.split('-', 1)
+    for part in time_parts:
+        part = part.strip()
+        if not part:
+            continue
             
-            # Validate time format (exactly HH:MM)
-            if (re.match(r'^\d{2}:\d{2}$', start_time) and 
-                re.match(r'^\d{2}:\d{2}$', end_time)):
-                slots.append((start_time, end_time))
+        # Handle cases where times might be stuck together (e.g., "14:0016:00")
+        # Insert space before a time that follows another time
+        part = re.sub(r'(\d{2}:\d{2})(\d{2}:\d{2})', r'\1 \2', part)
+        
+        # Find all time ranges in format HH:MM-HH:MM with optional spaces around dash
+        time_ranges = re.findall(r'\d{2}:\d{2}\s*-\s*\d{2}:\d{2}', part)
+        
+        for time_range in time_ranges:
+            # Remove all spaces and split on dash
+            clean_range = re.sub(r'\s', '', time_range)
+            if '-' in clean_range:
+                start_time, end_time = clean_range.split('-', 1)
+                
+                # Validate time format (exactly HH:MM)
+                if (re.match(r'^\d{2}:\d{2}$', start_time) and 
+                    re.match(r'^\d{2}:\d{2}$', end_time)):
+                    slots.append((start_time, end_time))
     
     return slots
 
